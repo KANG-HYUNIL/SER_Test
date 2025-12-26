@@ -9,3 +9,6 @@ mlflow
 matplotlib
 seaborn
 tqdm
+optuna
+pyyaml
+plotly
