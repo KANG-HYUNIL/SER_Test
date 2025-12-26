@@ -102,8 +102,16 @@ def main(cfg: DictConfig):
     Main training entry.
     Loads manifest, builds DataLoader, trains model, logs with MLflow, saves best checkpoint.
     """
-    device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
-    os.makedirs(cfg.train.log_dir, exist_ok=True)
+    import datetime
+    # log_dir이 기본값이면 outputs/{YYYYMMDD_HHMMSS}/로 자동 생성
+    default_log_dir = "./outputs"
+    if cfg.train.log_dir == default_log_dir or cfg.train.log_dir == "outputs":
+        now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_dir = os.path.join("outputs", now)
+        cfg.train.log_dir = log_dir
+    else:
+        log_dir = cfg.train.log_dir
+    os.makedirs(log_dir, exist_ok=True)
     manifest_path = os.path.join(cfg.data.processed_dir, "manifest.csv")
 
     # DataLoader
@@ -111,8 +119,7 @@ def main(cfg: DictConfig):
     val_set = SERDataset(manifest_path, split="val")
     train_loader = DataLoader(train_set, batch_size=cfg.data.batch_size, shuffle=True, num_workers=cfg.data.num_workers)
     val_loader = DataLoader(val_set, batch_size=cfg.data.batch_size, shuffle=False, num_workers=cfg.data.num_workers)
-    
-    
+
     # Model
     model = SERModel(
         cnn_filters=cfg.model.cnn_filters,
@@ -123,17 +130,28 @@ def main(cfg: DictConfig):
         dropout=cfg.model.transformer.dropout,
         num_classes=cfg.model.num_classes
     ).to(device)
-    
+
     # Optimizer, Loss
     optimizer = optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
     criterion = nn.NLLLoss()
 
     # MLflow
-    mlflow.set_tracking_uri("file://" + os.path.abspath(cfg.train.log_dir + "/mlruns"))
+    mlflow.set_tracking_uri("file://" + os.path.abspath(log_dir + "/mlruns"))
     mlflow.set_experiment(cfg.train.exp_name)
     best_val_acc = 0
     patience = 0
-    
+    best_epoch = 0
+    best_train_acc = 0
+    best_val_loss = 0
+    best_train_loss = 0
+    import time
+    start_time = time.time()
+
+    logger.info(f"\n========== Experiment started at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ==========")
+    logger.info(f"Experiment log_dir: {log_dir}")
+    logger.info(f"Used hyperparameters: {dict(cfg.train)}")
+    logger.info(f"Model config: {dict(cfg.model)}")
+
     with mlflow.start_run():
         mlflow.log_params(dict(cfg.train))
         mlflow.log_params(dict(cfg.model))
@@ -143,19 +161,40 @@ def main(cfg: DictConfig):
             val_loss, val_acc = eval_epoch(model, val_loader, criterion, device)
             mlflow.log_metrics({"train_loss": train_loss, "train_acc": train_acc, "val_loss": val_loss, "val_acc": val_acc}, step=epoch)
             logger.info(f"Epoch {epoch+1}/{cfg.train.epochs} | Train Loss: {train_loss:.4f} Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f} Acc: {val_acc:.4f}")
-           
+
             # Early stopping
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
+                best_epoch = epoch + 1
+                best_train_acc = train_acc
+                best_val_loss = val_loss
+                best_train_loss = train_loss
                 patience = 0
-                best_path = os.path.join(cfg.train.log_dir, "best.ckpt")
+                best_path = os.path.join(log_dir, "best.ckpt")
                 torch.save({"model_state_dict": model.state_dict()}, best_path)
                 logger.info(f"Saved best model to {best_path}")
+                # Save metrics to metrics_val.json
+                metrics = {
+                    "best_val_acc": best_val_acc,
+                    "best_epoch": best_epoch,
+                    "best_train_acc": best_train_acc,
+                    "best_val_loss": best_val_loss,
+                    "best_train_loss": best_train_loss,
+                    "duration_sec": time.time() - start_time,
+                    "params": dict(cfg.train)
+                }
+                metrics_path = os.path.join(log_dir, "metrics_val.json")
+                import json
+                with open(metrics_path, "w") as f:
+                    json.dump(metrics, f, indent=2)
             else:
                 patience += 1
                 if cfg.train.early_stopping and patience >= cfg.train.patience:
                     logger.info(f"Early stopping at epoch {epoch+1}")
                     break
+    logger.info(f"========== Experiment finished at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ==========")
+    logger.info(f"Best val_acc: {best_val_acc:.4f} at epoch {best_epoch}")
+    logger.info(f"Total training time: {time.time() - start_time:.2f} seconds")
 
 if __name__ == "__main__":
     main()
