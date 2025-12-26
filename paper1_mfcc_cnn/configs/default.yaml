@@ -1,0 +1,52 @@
+
+defaults:
+  - _self_
+
+# Data & Preprocessing
+data:
+  dataset_name: "ravdess"
+  data_root: "../datasets"
+  processed_dir: "./data_processed"
+  batch_size: 32
+  num_workers: 4
+  sr: 16000           # Sampling rate
+  n_mfcc: 40          # MFCC bins
+  target_len: 282     # Time frames (fixed)
+  duration: 3.0       # Target duration (seconds)
+  split_ratio: [0.7, 0.15, 0.15]  # train/val/test
+  seed: 42
+  pad_mode: "zero"    # Padding mode for MFCC
+  crop_mode: "left"   # Truncate mode (left/center)
+
+# Augmentation
+augment:
+  use_awgn: true
+  snr_min: 15
+  snr_max: 30
+  n_aug: 2            # Number of noisy replicas per clean sample
+  aug_prob: 1.0       # Probability of applying augmentation
+
+# Model
+model:
+  name: "cnn2_cnn2_transformer"
+  num_classes: 8
+  cnn_filters: [16, 32, 64]
+  transformer:
+    d_model: 512
+    nhead: 4
+    num_layers: 4
+    dim_feedforward: 2048
+    dropout: 0.1
+    use_positional_encoding: false
+
+# Training
+train:
+  epochs: 500
+  lr: 0.001
+  batch_size: 32
+  weight_decay: 0.0001
+  device: "cuda" # or "cpu"
+  log_dir: "./outputs"
+  exp_name: "paper1_mfcc_cnn_transformer"
+  early_stopping: true
+  patience: 20

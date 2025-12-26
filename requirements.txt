@@ -1,0 +1,11 @@
+torch
+torchaudio
+librosa
+numpy
+pandas
+scikit-learn
+hydra-core
+mlflow
+matplotlib
+seaborn
+tqdm
